@@ -1,6 +1,8 @@
 package subsonic
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -12,19 +14,33 @@ import (
 	"github.com/navidrome/navidrome/utils/slice"
 )
 
-const (
-	ActionGet     = "get"
-	ActionStatus  = "status"
-	ActionSet     = "set"
-	ActionStart   = "start"
-	ActionStop    = "stop"
-	ActionSkip    = "skip"
-	ActionAdd     = "add"
-	ActionClear   = "clear"
-	ActionRemove  = "remove"
-	ActionShuffle = "shuffle"
-	ActionSetGain = "setGain"
-)
+func (api *Router) JukeboxRemoteFeedback(rw http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := getUser(ctx)
+	p := req.Params(r)
+
+	if !conf.Server.Jukebox.Enabled {
+		http.Error(rw, "Jukebox is disabled", 404)
+		return
+	}
+
+	if !conf.Server.Jukebox.RemoteClients {
+		http.Error(rw, "Jukebox remote clients are disabled", 404)
+	}
+
+	status := playback.DeviceStatus{}
+	err := json.NewDecoder(p.Body).Decode(&status)
+	log.Debug(ctx, "JukeboxRemoteFeedback received", "playing", status.Playing, "position", status.Position, "index", status.CurrentIndex)
+	pb, err := api.playback.GetDeviceForUser(user.UserName)
+	if err != nil {
+		http.Error(rw, fmt.Sprintf("Error retrieving user devices: %s", err), 500)
+	}
+
+	err = pb.SetStatus(ctx, status)
+	if err != nil {
+		http.Error(rw, fmt.Sprintf("Error setting status : %s", err), 500)
+	}
+}
 
 func (api *Router) JukeboxControl(r *http.Request) (*responses.Subsonic, error) {
 	ctx := r.Context()
@@ -51,7 +67,7 @@ func (api *Router) JukeboxControl(r *http.Request) (*responses.Subsonic, error) 
 	log.Info(ctx, "JukeboxControl request received", "action", actionString)
 
 	switch actionString {
-	case ActionGet:
+	case playback.ActionGet:
 		mediafiles, status, err := pb.Get(ctx)
 		if err != nil {
 			return nil, err
@@ -65,37 +81,37 @@ func (api *Router) JukeboxControl(r *http.Request) (*responses.Subsonic, error) 
 		response := newResponse()
 		response.JukeboxPlaylist = &playlist
 		return response, nil
-	case ActionStatus:
+	case playback.ActionStatus:
 		return createResponse(pb.Status(ctx))
-	case ActionSet:
+	case playback.ActionSet:
 		ids, _ := p.Strings("id")
 		return createResponse(pb.Set(ctx, ids))
-	case ActionStart:
+	case playback.ActionStart:
 		return createResponse(pb.Start(ctx))
-	case ActionStop:
+	case playback.ActionStop:
 		return createResponse(pb.Stop(ctx))
-	case ActionSkip:
+	case playback.ActionSkip:
 		index, err := p.Int("index")
 		if err != nil {
 			return nil, newError(responses.ErrorMissingParameter, "missing parameter index, err: %s", err)
 		}
 		offset := p.IntOr("offset", 0)
 		return createResponse(pb.Skip(ctx, index, offset))
-	case ActionAdd:
+	case playback.ActionAdd:
 		ids, _ := p.Strings("id")
 		return createResponse(pb.Add(ctx, ids))
-	case ActionClear:
+	case playback.ActionClear:
 		return createResponse(pb.Clear(ctx))
-	case ActionRemove:
+	case playback.ActionRemove:
 		index, err := p.Int("index")
 		if err != nil {
 			return nil, err
 		}
 
 		return createResponse(pb.Remove(ctx, index))
-	case ActionShuffle:
+	case playback.ActionShuffle:
 		return createResponse(pb.Shuffle(ctx))
-	case ActionSetGain:
+	case playback.ActionSetGain:
 		gainStr, err := p.String("gain")
 		if err != nil {
 			return nil, newError(responses.ErrorMissingParameter, "missing parameter gain, err: %s", err)

@@ -212,6 +212,15 @@ func (api *Router) routes() http.Handler {
 			h501(r, "jukeboxControl")
 		}
 
+		if conf.Server.Jukebox.RemoteClients {
+			r.Group(func(r chi.Router) {
+				r.Use(getPlayer(api.players))
+				r.MethodFunc("POST", "/jukeboxRemoteFeedback", api.JukeboxRemoteFeedback)
+			})
+		} else {
+			h501(r, "jukeboxRemoteFeedback")
+		}
+
 		// Not Implemented (yet?)
 		h501(r, "getPodcasts", "getNewestPodcasts", "refreshPodcasts", "createPodcastChannel", "deletePodcastChannel",
 			"deletePodcastEpisode", "downloadPodcastEpisode")

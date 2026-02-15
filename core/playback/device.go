@@ -37,10 +37,10 @@ type playbackDevice struct {
 }
 
 type DeviceStatus struct {
-	CurrentIndex int
-	Playing      bool
-	Gain         float32
-	Position     int
+	CurrentIndex int     `json:"currentIndex"`
+	Playing      bool    `json:"playing"`
+	Gain         float32 `json:"gain"`
+	Position     int     `json:"position"`
 }
 
 const DefaultGain float32 = 1.0

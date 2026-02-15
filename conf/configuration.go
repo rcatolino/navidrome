@@ -214,10 +214,11 @@ type prometheusOptions struct {
 type AudioDeviceDefinition []string
 
 type jukeboxOptions struct {
-	Enabled   bool
-	Devices   []AudioDeviceDefinition
-	Default   string
-	AdminOnly bool
+	Enabled       bool
+	Devices       []AudioDeviceDefinition
+	Default       string
+	AdminOnly     bool
+	RemoteClients bool
 }
 
 type backupOptions struct {

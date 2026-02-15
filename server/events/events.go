@@ -63,6 +63,15 @@ type RefreshResource struct {
 	resources map[string][]string
 }
 
+type JukeboxCommand struct {
+	baseEvent
+	Action string   `json:"action"`
+	Gain   float32  `json:"gain"`
+	Ids    []string `json:"id"`
+	Index  int      `json:"index"`
+	Offset int      `json:"offset"`
+}
+
 type NowPlayingCount struct {
 	baseEvent
 	Count int `json:"count"`

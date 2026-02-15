@@ -12,19 +12,21 @@ import (
 	"github.com/navidrome/navidrome/conf"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
+	"github.com/navidrome/navidrome/server/events"
 	"github.com/navidrome/navidrome/utils/singleton"
 )
 
 type PlaybackServer interface {
 	Run(ctx context.Context) error
-	GetDeviceForUser(user string) (*playbackDevice, error)
+	GetDeviceForUser(user string) (Device, error)
 	GetMediaFile(id string) (*model.MediaFile, error)
 }
 
 type playbackServer struct {
 	ctx             *context.Context
 	datastore       model.DataStore
-	playbackDevices []playbackDevice
+	playbackDevices []Device
+	broker          *events.Broker
 }
 
 // GetInstance returns the playback-server singleton
@@ -42,12 +44,21 @@ func (ps *playbackServer) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	ps.playbackDevices = devices
-	log.Info(ctx, fmt.Sprintf("%d audio devices found", len(devices)))
 
+	if conf.Server.Jukebox.RemoteClients {
+		log.Info(ctx, "Activating remote jukebox clients")
+		for _, dev := range devices {
+			dev.SetDefault(false)
+		}
+
+		devices = append(devices, NewClientDevice(ctx, ps, "remote"))
+	}
+
+	log.Info(ctx, fmt.Sprintf("%d audio devices found", len(devices)))
+	ps.playbackDevices = devices
 	defaultDevice, _ := ps.getDefaultDevice()
 
-	log.Info(ctx, "Using audio device: "+defaultDevice.DeviceName)
+	log.Info(ctx, "Using audio device: "+defaultDevice.GetDeviceName())
 
 	<-ctx.Done()
 
@@ -55,55 +66,55 @@ func (ps *playbackServer) Run(ctx context.Context) error {
 	return nil
 }
 
-func (ps *playbackServer) initDeviceStatus(ctx context.Context, devices []conf.AudioDeviceDefinition, defaultDevice string) ([]playbackDevice, error) {
-	pbDevices := make([]playbackDevice, max(1, len(devices)))
+func (ps *playbackServer) initDeviceStatus(ctx context.Context, devices []conf.AudioDeviceDefinition, defaultDevice string) ([]Device, error) {
+	pbDevices := make([]Device, max(1, len(devices)))
 	defaultDeviceFound := false
 
 	if defaultDevice == "" {
 		// if there are no devices given and no default device, we create a synthetic device named "auto"
 		if len(devices) == 0 {
-			pbDevices[0] = *NewPlaybackDevice(ctx, ps, "auto", "auto")
+			pbDevices[0] = NewPlaybackDevice(ctx, ps, "auto", "auto")
 		}
 
 		// if there is but only one entry and no default given, just use that.
 		if len(devices) == 1 {
 			if len(devices[0]) != 2 {
-				return []playbackDevice{}, fmt.Errorf("audio device definition ought to contain 2 fields, found: %d ", len(devices[0]))
+				return []Device{}, fmt.Errorf("audio device definition ought to contain 2 fields, found: %d ", len(devices[0]))
 			}
-			pbDevices[0] = *NewPlaybackDevice(ctx, ps, devices[0][0], devices[0][1])
+			pbDevices[0] = NewPlaybackDevice(ctx, ps, devices[0][0], devices[0][1])
 		}
 
 		if len(devices) > 1 {
-			return []playbackDevice{}, fmt.Errorf("number of audio device found is %d, but no default device defined. Set Jukebox.Default", len(devices))
+			return []Device{}, fmt.Errorf("number of audio device found is %d, but no default device defined. Set Jukebox.Default", len(devices))
 		}
 
-		pbDevices[0].Default = true
+		pbDevices[0].SetDefault(true)
 		return pbDevices, nil
 	}
 
 	for idx, audioDevice := range devices {
 		if len(audioDevice) != 2 {
-			return []playbackDevice{}, fmt.Errorf("audio device definition ought to contain 2 fields, found: %d ", len(audioDevice))
+			return []Device{}, fmt.Errorf("audio device definition ought to contain 2 fields, found: %d ", len(audioDevice))
 		}
 
-		pbDevices[idx] = *NewPlaybackDevice(ctx, ps, audioDevice[0], audioDevice[1])
+		pbDevices[idx] = NewPlaybackDevice(ctx, ps, audioDevice[0], audioDevice[1])
 
 		if audioDevice[0] == defaultDevice {
-			pbDevices[idx].Default = true
+			pbDevices[idx].SetDefault(true)
 			defaultDeviceFound = true
 		}
 	}
 
 	if !defaultDeviceFound {
-		return []playbackDevice{}, fmt.Errorf("default device name not found: %s ", defaultDevice)
+		return []Device{}, fmt.Errorf("default device name not found: %s ", defaultDevice)
 	}
 	return pbDevices, nil
 }
 
-func (ps *playbackServer) getDefaultDevice() (*playbackDevice, error) {
+func (ps *playbackServer) getDefaultDevice() (Device, error) {
 	for idx := range ps.playbackDevices {
-		if ps.playbackDevices[idx].Default {
-			return &ps.playbackDevices[idx], nil
+		if ps.playbackDevices[idx].IsDefault() {
+			return ps.playbackDevices[idx], nil
 		}
 	}
 	return nil, fmt.Errorf("no default device found")
@@ -115,13 +126,13 @@ func (ps *playbackServer) GetMediaFile(id string) (*model.MediaFile, error) {
 }
 
 // GetDeviceForUser returns the audio playback device for the given user. As of now this is but only the default device.
-func (ps *playbackServer) GetDeviceForUser(user string) (*playbackDevice, error) {
+func (ps *playbackServer) GetDeviceForUser(user string) (Device, error) {
 	log.Debug("Processing GetDevice", "user", user)
 	// README: here we might plug-in the user-device mapping one fine day
 	device, err := ps.getDefaultDevice()
 	if err != nil {
 		return nil, err
 	}
-	device.User = user
+	device.SetUser(user)
 	return device, nil
 }
