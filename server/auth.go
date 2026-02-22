@@ -256,7 +256,9 @@ func authenticateRequest(ds model.DataStore, r *http.Request, findUsernameFns ..
 func Authenticator(ds model.DataStore) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx, err := authenticateRequest(ds, r, UsernameFromConfig, UsernameFromToken, UsernameFromExtAuthHeader)
+			ctx, err := authenticateRequest(ds, r, UsernameFromConfig, UsernameFromToken, UsernameFromExtAuthHeader, func(r *http.Request) string {
+				return UsernameFromBasicAuth(r, ds)
+			})
 			if err != nil {
 				_ = rest.RespondWithError(w, http.StatusUnauthorized, "Not authenticated")
 				return

@@ -6,6 +6,8 @@ Dockerfile
 docker-compose*.yml
 data
 *.db
+*.toml
+.dockerignore
 testDB
 navidrome
 navidrome.toml
