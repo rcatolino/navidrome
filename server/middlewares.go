@@ -134,8 +134,10 @@ func clientUniqueIDMiddleware(next http.Handler) http.Handler {
 		ctx := r.Context()
 		clientUniqueId := r.Header.Get(consts.UIClientUniqueIDHeader)
 
+		log.Debug("ClientUniqueId middleware begin")
 		// If clientUniqueId is found in the header, set it as a cookie
 		if clientUniqueId != "" {
+			log.Debug("ClientUniqueId found in header")
 			c := &http.Cookie{
 				Name:     consts.UIClientUniqueIDHeader,
 				Value:    clientUniqueId,
@@ -150,12 +152,14 @@ func clientUniqueIDMiddleware(next http.Handler) http.Handler {
 			// If clientUniqueId is not found in the header, check if it's present as a cookie
 			c, err := r.Cookie(consts.UIClientUniqueIDHeader)
 			if !errors.Is(err, http.ErrNoCookie) {
+				log.Debug("ClientUniqueId found in cookie")
 				clientUniqueId = c.Value
 			}
 		}
 
 		// If a valid clientUniqueId is found, add it to the request context
 		if clientUniqueId != "" {
+			log.Debug("Adding client unique id to context")
 			ctx = request.WithClientUniqueId(ctx, clientUniqueId)
 			r = r.WithContext(ctx)
 		}

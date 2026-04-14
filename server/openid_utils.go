@@ -27,7 +27,7 @@ func MakeStateToken(session_id string) string {
 	mac.Write(iv[:])
 	mac.Write([]byte(session_id))
 	state := mac.Sum(iv[:])
-	log.Debug("GetStateToken Using ephemeral key : %x, iv : %x and mac : %x. Output mac length : %d", _state_key, iv, state, len(state))
+	log.Debug("Make state token", "ephemeralKey", _state_key, "iv", iv, "state", state, "stateLen", len(state))
 	return base64.URLEncoding.EncodeToString(state)
 }
 
@@ -41,7 +41,7 @@ func CheckStateToken(session_id string, b64state string) bool {
 	}
 
 	if len(state) != mac.Size()+16 {
-		log.Error("CheckStateToken error : unexpected state length %d != %d", len(state), mac.Size()+16)
+		log.Error("CheckStateToken error : unexpected state length", "expected", mac.Size()+16, "got", len(state))
 		return false
 	}
 
@@ -52,7 +52,7 @@ func CheckStateToken(session_id string, b64state string) bool {
 	return hmac.Equal(state[16:], stateMac)
 }
 
-func CheckClaims(token *jwt.Token) (sub, username string, err error) {
+func checkClaims(token *jwt.Token) (sub, username string, err error) {
 	sub, err = token.Claims.GetSubject()
 	if err != nil {
 		log.Info("Token valid, but subject claim is missing.")
@@ -74,7 +74,7 @@ func CheckClaims(token *jwt.Token) (sub, username string, err error) {
 		return "", "", fmt.Errorf("missing 'resource_access' claim for sub %s. Claims : %v", sub, mapClaims)
 	}
 	if orwell_res, present := resources[conf.Server.OpenID.ClientId].(map[string]any); !present {
-		return "", "", fmt.Errorf("missing ressource in 'resource_access' claim", "expected", conf.Server.OpenID.ClientId, "resources", resources)
+		return "", "", fmt.Errorf("missing ressource '%s' in 'resource_access' claim %s", conf.Server.OpenID.ClientId, resources)
 	} else if roles, present := orwell_res["roles"].([]any); !present {
 		return "", "", fmt.Errorf("missing roles in client resources: %v", orwell_res)
 	} else if !slices.Contains(roles, "user") {
@@ -84,7 +84,7 @@ func CheckClaims(token *jwt.Token) (sub, username string, err error) {
 	return sub, username, nil
 }
 
-func Validate(tokenString string) (*jwt.Token, error) {
+func validateToken(tokenString string) (*jwt.Token, error) {
 	// See https://openid.net/specs/openid-connect-core-1_0.html#IDTokenValidation
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
 		var defaultKey []byte

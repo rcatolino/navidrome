@@ -208,13 +208,15 @@ type httpHeaderOptions struct {
 }
 
 type openidOptions struct {
-	Alg                   string
-	AuthorizationEndpoint string
-	ClientId              string
-	ClientSecret          string
-	Issuer                string
-	PublicKey             string
-	PublicKeyId           string
+	Alg              string
+	AuthorizationURL string
+	ClientId         string
+	ClientSecret     string
+	Enabled          bool
+	Issuer           string
+	PublicKey        string
+	PublicKeyId      string
+	TokenURL         string
 }
 
 type prometheusOptions struct {
@@ -352,8 +354,10 @@ func Load(noConfigDump bool) {
 		validateBackupSchedule,
 		validatePlaylistsPath,
 		validatePurgeMissingOption,
+		validateOpenidConfig,
 	)
 	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "FATAL: Error validating config file: %s\n", err.Error())
 		os.Exit(1)
 	}
 
@@ -485,6 +489,35 @@ func validatePlaylistsPath() error {
 		if err != nil {
 			log.Error("Invalid PlaylistsPath", "path", path, err)
 			return err
+		}
+	}
+	return nil
+}
+
+func validateOpenidConfig() error {
+	if Server.OpenID.Enabled {
+		if Server.OpenID.AuthorizationURL == "" {
+			err := fmt.Errorf("Server.OpenID.AuthorizationURL cannot be empty when OpenID is enabled")
+			return err
+		}
+		if Server.OpenID.ClientId == "" {
+			err := fmt.Errorf("Server.OpenID.ClientId cannot be empty when OpenID is enabled")
+			return err
+		}
+		if Server.OpenID.ClientSecret == "" {
+			err := fmt.Errorf("Server.OpenID.ClientSecret cannot be empty when OpenID is enabled")
+			return err
+		}
+		if Server.OpenID.TokenURL == "" {
+			err := fmt.Errorf("Server.OpenID.TokenURL cannot be empty when OpenID is enabled")
+			return err
+		}
+		if Server.OpenID.Issuer == "" {
+			err := fmt.Errorf("Server.OpenID.Issuer cannot be empty when OpenID is enabled")
+			return err
+		}
+		if Server.OpenID.Alg == "" {
+			Server.OpenID.Alg = "HS256"
 		}
 	}
 	return nil
@@ -685,6 +718,7 @@ func setViperDefaults() {
 	viper.SetDefault("plugins.enabled", true)
 	viper.SetDefault("plugins.cachesize", "200MB")
 	viper.SetDefault("plugins.autoreload", false)
+	viper.SetDefault("openid.enabled", false)
 
 	// DevFlags. These are used to enable/disable debugging and incomplete features
 	viper.SetDefault("devlogsourceline", false)
