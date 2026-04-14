@@ -42,6 +42,7 @@ func New(ds model.DataStore, broker events.Broker, insights metrics.Insights) *S
 	auth.Init(s.ds)
 	s.initRoutes()
 	s.mountAuthenticationRoutes()
+	s.mountOpenidConnectRoutes()
 	s.mountRootRedirector()
 	checkFFmpegInstallation()
 	checkExternalCredentials()

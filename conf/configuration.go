@@ -93,6 +93,7 @@ type configOptions struct {
 	PasswordEncryptionKey           string
 	ExtAuth                         extAuthOptions
 	Plugins                         pluginsOptions
+	OpenID                          openidOptions       `json:",omitzero"`
 	HTTPHeaders                     httpHeaderOptions   `json:",omitzero"`
 	Prometheus                      prometheusOptions   `json:",omitzero"`
 	Scanner                         scannerOptions      `json:",omitzero"`
@@ -204,6 +205,16 @@ type listenBrainzOptions struct {
 
 type httpHeaderOptions struct {
 	FrameOptions string
+}
+
+type openidOptions struct {
+	Alg                   string
+	AuthorizationEndpoint string
+	ClientId              string
+	ClientSecret          string
+	Issuer                string
+	PublicKey             string
+	PublicKeyId           string
 }
 
 type prometheusOptions struct {
