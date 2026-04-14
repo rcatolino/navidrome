@@ -26,10 +26,36 @@ function storeAuthenticationInfo(authInfo) {
   localStorage.setItem('is-authenticated', 'true')
 }
 
+function doOpenIdAuth() {
+  let url = baseUrl('/authsso/login')
+  const request = new Request(url, {
+    method: 'GET',
+    redirect: 'follow',
+  })
+
+  // TODO: replace with location setting
+  return fetch(request)
+    .then((response) => {
+      if (response.status < 200 || response.status >= 400) {
+        throw new Error(response.statusText)
+      }
+    })
+    .catch((error) => {
+      if (error.message === 'Failed to fetch' ||
+        error.stack === 'TypeError: Failed to fetch') {
+        throw new Error('errors.network_error')
+      }
+    })
+
+}
+
 const authProvider = {
   login: ({ username, password }) => {
     let url = baseUrl('/auth/login')
-    if (config.firstTime) {
+    if (config.openidEnabled) {
+      doOpenIdAuth()
+      return
+    } else if (config.firstTime) {
       url = baseUrl('/auth/createAdmin')
     }
     const request = new Request(url, {
@@ -37,6 +63,7 @@ const authProvider = {
       body: JSON.stringify({ username, password }),
       headers: new Headers({ 'Content-Type': 'application/json' }),
     })
+
     return fetch(request)
       .then((response) => {
         if (response.status < 200 || response.status >= 300) {

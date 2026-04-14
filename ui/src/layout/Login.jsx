@@ -141,6 +141,7 @@ const FormLogin = ({ loading, handleSubmit, validate }) => {
                   dangerouslySetInnerHTML={{ __html: config.welcomeMessage }}
                 />
               )}
+              {!config.openidEnabled && (
               <div className={classes.form}>
                 <div className={classes.input}>
                   <Field
@@ -162,6 +163,7 @@ const FormLogin = ({ loading, handleSubmit, validate }) => {
                   />
                 </div>
               </div>
+              )}
               <CardActions className={classes.actions}>
                 <Button
                   variant="contained"
@@ -344,6 +346,10 @@ const Login = ({ location }) => {
 
   const validateLogin = useCallback(
     (values) => {
+      if (config.openidEnabled) {
+        return
+      }
+
       const errors = {}
       if (!values.username) {
         errors.username = translate('ra.validation.required')

@@ -1,14 +1,15 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/deluan/rest"
@@ -16,10 +17,10 @@ import (
 	"github.com/navidrome/navidrome/conf"
 	"github.com/navidrome/navidrome/consts"
 	"github.com/navidrome/navidrome/core/auth"
+	"github.com/navidrome/navidrome/core/publicurl"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
 	"github.com/navidrome/navidrome/model/id"
-	"github.com/navidrome/navidrome/model/request"
 )
 
 type ErrorResponse struct {
@@ -35,6 +36,15 @@ type TokenResponse struct {
 	RefreshToken string `json:"refresh_token"`
 	IdToken      string `json:"id_token"`
 }
+
+type UserInfo struct {
+	subject  string
+	roles    []any
+	username string
+}
+
+const SESSION_MAX_AGE = 3600
+const SESSION_ID_CTX_KEY = "sessionid"
 
 var _state_key = GetRand128()
 
@@ -62,9 +72,9 @@ func (s *Server) mountOpenidConnectRoutes() chi.Router {
 func ssocallback(ds model.DataStore) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		values := r.URL.Query()
-		clientUniqueId, exists := request.ClientUniqueIdFrom(r.Context())
+		sessionId, exists := r.Context().Value(SESSION_ID_CTX_KEY).(string)
 		if !exists {
-			log.Error("/authsso/callback: Expected client id key in context is missing")
+			log.Error("/authsso/callback: Expected session id key in context is missing")
 			http.Redirect(w, r, "/", 302)
 			return
 		}
@@ -87,16 +97,14 @@ func ssocallback(ds model.DataStore) func(w http.ResponseWriter, r *http.Request
 		state := values.Get("state")
 		code := values.Get("code")
 		log.Debug("Auth callback url.", "state", state, "session_state", session_state, "code", code)
-		if !CheckStateToken(clientUniqueId, state) {
-			log.Info("Auth callback: Error validating state with client id", "state", state, "clientId", clientUniqueId)
+		if !CheckStateToken(sessionId, state) {
+			log.Info("Auth callback: Error validating state with session id", "state", state, "sessionId", sessionId)
 			w.WriteHeader(401)
 			w.Write([]byte("Authentication error\n"))
 			return
 		}
 
-		// TODO: remove passing of qp
-		qp := values.Get("qp")
-		token, err := GetIdToken(code, qp)
+		token, err := GetIdToken(code, publicurl.PublicURL(r, "/authsso/callback", nil))
 		if err != nil {
 			log.Warn("Auth callback: GetIdToken failed", "error", err)
 			w.WriteHeader(401)
@@ -112,7 +120,7 @@ func ssocallback(ds model.DataStore) func(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		_, username, err := checkClaims(res)
+		userInfo, err := checkClaims(res)
 		if err != nil {
 			log.Info("Auth callback: error checking token claims", "error", err)
 			w.WriteHeader(403)
@@ -121,31 +129,27 @@ func ssocallback(ds model.DataStore) func(w http.ResponseWriter, r *http.Request
 		}
 
 		userRepo := ds.User(r.Context())
-		user, err := userRepo.FindByUsername(username)
+		user, err := userRepo.FindByUsername(userInfo.username)
 		if user == nil || err != nil {
-			log.Info(r, "User not found in local repository", "user", username)
-			// Check if this is the first user being created
-			count, _ := userRepo.CountAll()
-			isFirstUser := count == 0
-
+			log.Info(r, "User not found in local repository", "user", userInfo.username)
 			newUser := model.User{
 				ID:          id.NewRandom(),
-				UserName:    username,
-				Name:        username,
+				UserName:    userInfo.username,
+				Name:        userInfo.username,
 				Email:       "",
 				NewPassword: consts.PasswordAutogenPrefix + id.NewRandom(),
-				IsAdmin:     isFirstUser, // Make the first user an admin
+				IsAdmin:     slices.Contains(userInfo.roles, "navidrome-admin"), // Make the first user an admin
 			}
 			err := userRepo.Put(&newUser)
 			if err != nil {
-				log.Error(r, "Could not create new user", "user", username, err)
+				log.Error(r, "Could not create new user", "user", userInfo.username, err)
 				w.WriteHeader(500)
 				w.Write([]byte("Internal server error\n"))
 				return
 			}
-			user, err = userRepo.FindByUsernameWithPassword(username)
+			user, err = userRepo.FindByUsername(userInfo.username)
 			if user == nil || err != nil {
-				log.Error(r, "Created user but failed to fetch it", "user", username)
+				log.Error(r, "Created user but failed to fetch it", "user", userInfo.username)
 				_ = rest.RespondWithError(w, http.StatusInternalServerError, "Unknown error authenticating user. Please try again")
 				return
 			}
@@ -153,7 +157,7 @@ func ssocallback(ds model.DataStore) func(w http.ResponseWriter, r *http.Request
 
 		err = userRepo.UpdateLastLoginAt(user.ID)
 		if err != nil {
-			log.Error(r, "Could not update LastLoginAt", "user", username, err)
+			log.Error(r, "Could not update LastLoginAt", "user", userInfo.username, err)
 			_ = rest.RespondWithError(w, http.StatusInternalServerError, "Unknown error authenticating user. Please try again")
 			return
 		}
@@ -172,18 +176,16 @@ func ssocallback(ds model.DataStore) func(w http.ResponseWriter, r *http.Request
 func ssologin() func(w http.ResponseWriter, r *http.Request) {
 	// Triggers an authentication flow following https://openid.net/specs/openid-connect-core-1_0.html#AuthRequest
 	return func(w http.ResponseWriter, r *http.Request) {
-		clientUniqueId, exists := request.ClientUniqueIdFrom(r.Context())
+		sessionId, exists := r.Context().Value(SESSION_ID_CTX_KEY).(string)
 		if !exists {
-			log.Fatal("OpenID auth bug: clientUniqueId not set. The ClientUniqueId middleware should be run before authentication.")
+			log.Fatal("OpenID auth bug: sessionId not set. The SessionId middleware should be run before authentication.")
 		}
-		queryParams := base64.URLEncoding.EncodeToString([]byte(r.URL.Query().Encode()))
 		url := fmt.Sprintf(
-			"%s?response_type=code&client_id=%s&scope=openid%%20roles&redirect_uri=%s/auth/callback%%3fqp=%s&state=%s",
+			"%s?response_type=code&client_id=%s&scope=openid%%20roles&redirect_uri=%s&state=%s",
 			conf.Server.OpenID.AuthorizationURL,
 			conf.Server.OpenID.ClientId,
-			conf.Server.BaseURL,
-			queryParams,
-			MakeStateToken(clientUniqueId),
+			publicurl.PublicURL(r, "/authsso/callback", nil),
+			MakeStateToken(sessionId),
 		)
 
 		log.Info("Auth middleware, redirecting to IDP", "url", url)
@@ -191,9 +193,8 @@ func ssologin() func(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func GetIdToken(code string, qp string) (*TokenResponse, error) {
+func GetIdToken(code string, redirectUri string) (*TokenResponse, error) {
 	// See https://openid.net/specs/openid-connect-core-1_0.html#TokenEndpoint
-	redirectUri := fmt.Sprintf("%s/auth_callback?qp=%s", conf.Server.BaseURL, qp)
 	tokenUrlBasicAuth := strings.Replace(
 		conf.Server.OpenID.TokenURL,
 		"https://", fmt.Sprintf("https://%s:%s@", conf.Server.OpenID.ClientId, conf.Server.OpenID.ClientSecret),
@@ -234,4 +235,40 @@ func GetIdToken(code string, qp string) (*TokenResponse, error) {
 	}
 
 	return nil, fmt.Errorf("unexpected response code %d", resp.StatusCode)
+}
+
+// Similar to the clientUniqueIDMiddleware, but a bit different.
+// - not controlled by the client
+// - same-site: lax (important to be sent by the UA on 302 redirects from IDP)
+func sessionIdMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		log.Debug("SessionId middleware begin")
+		s, err := r.Cookie(SESSION_ID_CTX_KEY)
+		var sessionId string
+		if err != nil {
+			// No existing session cookie
+			// Create new session
+			sessionId = rand.Text()
+			log.Debug("No session cookie, creating one", "session_id", sessionId)
+			http.SetCookie(w, &http.Cookie{
+				Name:     SESSION_ID_CTX_KEY,
+				Path:     "/",
+				Value:    sessionId,
+				MaxAge:   SESSION_MAX_AGE,
+				Secure:   conf.Server.TLSKey != "",
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+			})
+		} else {
+			sessionId = s.Value
+			log.Debug("Existing session cookie found", "session_id", sessionId)
+		}
+
+		ctx = context.WithValue(ctx, SESSION_ID_CTX_KEY, sessionId)
+		r = r.WithContext(ctx)
+		// Call the next middleware or handler in the chain
+		next.ServeHTTP(w, r)
+	})
 }

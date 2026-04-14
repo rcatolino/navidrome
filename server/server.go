@@ -180,6 +180,7 @@ func (s *Server) initRoutes() {
 		robotsTXT(ui.BuildAssets()),
 		serverAddressMiddleware,
 		clientUniqueIDMiddleware,
+		sessionIdMiddleware,
 		compressMiddleware(),
 		loggerInjector,
 		JWTVerifier,

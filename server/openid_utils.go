@@ -52,36 +52,41 @@ func CheckStateToken(session_id string, b64state string) bool {
 	return hmac.Equal(state[16:], stateMac)
 }
 
-func checkClaims(token *jwt.Token) (sub, username string, err error) {
-	sub, err = token.Claims.GetSubject()
+func checkClaims(token *jwt.Token) (*UserInfo, error) {
+	userInfo := UserInfo{}
+	sub, err := token.Claims.GetSubject()
 	if err != nil {
 		log.Info("Token valid, but subject claim is missing.")
-		return "", "", err
+		return nil, err
 	}
 
+	userInfo.subject = sub
 	mapClaims, valid := token.Claims.(jwt.MapClaims)
 	if !valid {
-		return "", "", fmt.Errorf("missing claims in id token for sub %s", sub)
+		return nil, fmt.Errorf("missing claims in id token for sub %s", sub)
 	}
 
 	username, exists := mapClaims["preferred_username"].(string)
 	if !exists {
-		return "", "", fmt.Errorf("missing 'preferred_username' claim for sub %s", sub)
+		return nil, fmt.Errorf("missing 'preferred_username' claim for sub %s", sub)
 	}
 
+	userInfo.username = username
+	log.Debug("IDP token response", "username", username, "mapClaims", mapClaims)
 	resources, exists := mapClaims["resource_access"].(map[string]any)
 	if !exists {
-		return "", "", fmt.Errorf("missing 'resource_access' claim for sub %s. Claims : %v", sub, mapClaims)
+		return nil, fmt.Errorf("missing 'resource_access' claim for sub %s. Claims : %v", sub, mapClaims)
 	}
-	if orwell_res, present := resources[conf.Server.OpenID.ClientId].(map[string]any); !present {
-		return "", "", fmt.Errorf("missing ressource '%s' in 'resource_access' claim %s", conf.Server.OpenID.ClientId, resources)
-	} else if roles, present := orwell_res["roles"].([]any); !present {
-		return "", "", fmt.Errorf("missing roles in client resources: %v", orwell_res)
-	} else if !slices.Contains(roles, "user") {
-		return "", "", fmt.Errorf("role 'user' is not among the user roles: %v", roles)
+	if res, present := resources[conf.Server.OpenID.ClientId].(map[string]any); !present {
+		log.Debug("No 'resource_access[navidrome]' claim in GetToken response. Ignoring roles.")
+		return &userInfo, nil
+	} else if roles, present := res["roles"].([]any); !present {
+		log.Debug("No 'roles' resource in 'resource_access[navidrome]' claim. Ignoring roles.")
+	} else {
+		userInfo.roles = roles
 	}
 
-	return sub, username, nil
+	return &userInfo, err
 }
 
 func validateToken(tokenString string) (*jwt.Token, error) {
