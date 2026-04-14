@@ -86,7 +86,7 @@ func robotsTXT(fs fs.FS) func(http.Handler) http.Handler {
 
 func corsHandler() func(http.Handler) http.Handler {
 	return cors.Handler(cors.Options{
-		AllowedOrigins: []string{"*"},
+		AllowedOrigins: conf.Server.AllowedOrigins,
 		AllowedMethods: []string{
 			http.MethodHead,
 			http.MethodGet,

@@ -24,6 +24,7 @@ import (
 type configOptions struct {
 	ConfigFile                      string
 	Address                         string
+	AllowedOrigins                  []string
 	Port                            int
 	UnixSocketPerm                  string
 	MusicFolder                     string
@@ -562,6 +563,7 @@ func setViperDefaults() {
 	viper.SetDefault("loglevel", "info")
 	viper.SetDefault("logfile", "")
 	viper.SetDefault("address", "0.0.0.0")
+	viper.SetDefault("allowedorigins", []string{"*"})
 	viper.SetDefault("port", 4533)
 	viper.SetDefault("unixsocketperm", "0660")
 	viper.SetDefault("sessiontimeout", consts.DefaultSessionTimeout)
